@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<BorlandProject>
+	<Transactions>
+    <Transaction>1899.12.30 00:00:00.000.656,=D:\ВУЗ\ОАиП\грёбаный курсач\archiver3000\types.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.284,C:\Users\windows\Documents\Embarcadero\Studio\Projects\Unit1.pas=D:\ВУЗ\ОАиП\грёбаный курсач\archiver3000\mainUnit.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.102,=C:\Users\windows\Documents\Embarcadero\Studio\Projects\Unit1.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.284,C:\Users\windows\Documents\Embarcadero\Studio\Projects\Unit1.dfm=D:\ВУЗ\ОАиП\грёбаный курсач\archiver3000\mainUnit.dfm</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.161,=D:\ВУЗ\ОАиП\грёбаный курсач\archiver3000\Unit1.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.430,C:\Users\windows\Documents\Embarcadero\Studio\Projects\archiver3000.dproj=D:\ВУЗ\ОАиП\грёбаный курсач\archiver3000\archiver3000.dproj</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.799,C:\Users\windows\Documents\Embarcadero\Studio\Projects\Project1.dproj=C:\Users\windows\Documents\Embarcadero\Studio\Projects\archiver3000.dproj</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.914,=D:\ВУЗ\ОАиП\грёбаный курсач\archiver3000\win_condition.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.566,D:\ВУЗ\ОАиП\грёбаный курсач\archiver3000\Unit1.pas=D:\ВУЗ\ОАиП\грёбаный курсач\archiver3000\file_functions.pas</Transaction>
+  </Transactions>
+</BorlandProject>

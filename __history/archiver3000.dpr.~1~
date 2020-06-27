@@ -1,0 +1,14 @@
+program archiver3000;
+
+uses
+  Vcl.Forms,
+  mainUnit in 'mainUnit.pas' {MainForm};
+
+{$R *.res}
+
+begin
+  Application.Initialize;
+  Application.MainFormOnTaskbar := True;
+  Application.CreateForm(TMainForm, MainForm);
+  Application.Run;
+end.

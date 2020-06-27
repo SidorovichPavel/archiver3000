@@ -1,0 +1,1036 @@
+unit mainUnit;
+
+interface
+
+uses
+  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
+  Vcl.Controls, Vcl.Forms, Vcl.Dialogs,
+  win_condition, types, System.Actions, Vcl.ActnList, Vcl.StdCtrls, Vcl.ComCtrls,
+  Vcl.Tabs, Vcl.DockTabSet, Vcl.FileCtrl, Vcl.Grids,
+  Vcl.Samples.DirOutln;
+
+type
+  TMainForm = class(TForm)
+    ArchiveHafButton: TButton;
+    ArchiveLZWButton: TButton;
+    ArchiveRLEButton: TButton;
+    path: TEdit;
+    Actions: TActionList;
+    ArchiveHafman: TAction;
+    ArchiveLZW: TAction;
+    ArchiveRLE: TAction;
+    DecodeButton: TButton;
+    Decode: TAction;
+    Files: TFileListBox;
+    Folders: TDirectoryListBox;
+    Drives: TDriveComboBox;
+    Filter: TFilterComboBox;
+    DirectoryUpdate: TAction;
+    Button1: TButton;
+    SFS: TLabel;
+    SFS_text: TEdit;
+    CFS: TLabel;
+    CFS_text: TEdit;
+    CompR: TLabel;
+    CompR_text: TEdit;
+    procedure textUpdate();
+    procedure dirUpdate();
+    procedure ArchiveHafmanExecute(Sender: TObject);
+    procedure ArchiveLZWExecute(Sender: TObject);
+    procedure ArchiveRLEExecute(Sender: TObject);
+    procedure DecodeExecute(Sender: TObject);
+    procedure createMainForm(Sender: TObject);
+    procedure changeFileDir(Sender: TObject);
+    procedure DirectoryUpdateExecute(Sender: TObject);
+  private
+    { Private declarations }
+  public
+    { Public declarations }
+  end;
+
+var
+  MainForm: TMainForm;
+
+implementation
+
+{$R *.dfm}
+
+function getVoidFileName(FullName:string):string;
+    var i:int;
+begin
+    i:=length(Fullname)-1;
+    while (i>0)and(FullName[i] <> '.') do
+        dec(i);
+
+    if i>0 then
+        result := copy(FullName,1,i-1)
+    else
+        result := FullName;
+end;
+function getFileExtended(FullName:string):string;
+var
+    i     : int;
+begin
+    i := length(fullName);
+    while (i>0)and(fullName[i]<>'.') do
+        dec(i);
+
+    if i = 0 then
+        result := ''
+    else
+        result := copy(FullName,i+1,length(fullName)-i);
+end;
+procedure make_file_write(var currFile:TFileB;B:byte);        overload;//inline;
+begin
+    write(currFile,B);
+end;
+procedure make_file_write(var currFile:TFileB;W:word);        overload;//inline;
+var
+        temp    : byte;
+        i       : byte;
+begin
+    for i := 0 to 1 do
+    begin
+        temp := W mod 256;
+        write(currFile,temp);
+        W := W shr 8;
+    end;
+end;
+procedure make_file_write(var currFile:TFileB;LW:longWord);    overload;//inline;
+    var
+        temp    : byte;
+        i       : byte;
+begin
+    for i:=0 to 3 do
+    begin
+        temp := Lw mod 256;
+        write(currFile,temp);
+        lw := lw shr 8;
+    end;
+end;
+procedure make_file_write(var currFile:TFileB;str:string);    overload;
+var
+    i     : int;
+    temp  : byte;
+begin
+    for i:=1 to length(str) do
+    begin
+        temp := ord(str[i]);
+        write(currFile,temp);
+    end;
+end;
+procedure read_from_file(var currFile:TFileB;var W:Word);
+var
+          t         : array[0..1] of byte;
+begin
+    read(currFile,t[0]);
+    read(currFile,t[1]);
+    w := t[1] shl 8 + t[0];
+end;
+procedure writeExt(var f:TFileB;FN:string); overload;
+var
+          i       : int;
+          extL    : byte;
+          symbol  : byte;
+begin
+    i:=length(Fn);
+    extL := 0;
+    while (i>0)and(fn[i] <> '.') do
+    begin
+        dec(i);
+        inc(extL);
+    end;
+    if i=0 then
+    begin
+        make_file_write(f,0);
+        exit;
+    end;
+
+    write(f,extL);
+    inc(i);
+    for i:=i to length(fn) do
+    begin
+        symbol := ord(fn[i]);
+        write(f,symbol);
+    end;
+end;
+function readExt(var F:TFileB):string;
+var
+          ELength : byte;
+          i       : byte;
+          symbol  : byte;
+begin
+    read(F,ELength);
+    for i:=1 to ELength do
+    begin
+        read(F,symbol);
+        result := result + chr(symbol);
+    end;
+end;
+procedure updateText(var f1,f2:TFileB);
+begin
+    mainForm.SFS_text.Text := intToStr(fileSize(f1));
+    mainForm.CFS_text.Text := inttoStr(filesize(f2));
+    try
+        mainForm.CompR_text.Text := floatToStr(fileSize(f1)/fileSize(f2));
+    except
+        mainForm.CompR_text.Text := '-';
+    end;
+end;
+
+procedure createHafmanFile(FN:string);
+type
+
+    TTempArrayFrequency = array[0..255] of longWord;
+    TCodePTR    = TVector<TCode>.at_res_t;
+    THafTree    = TBin_search_tree;
+var
+    TempArrayFrequency  : TTempArrayFrequency;
+    DataFile      : TFileB;
+    HafDataFile   : TFileB;
+    newFileName   : string;
+    symbol        : byte;
+    i             : int;
+    ib            : byte;
+    shiftControl  : byte;
+    counter       : byte;
+    Tree          : THafTree;
+    CodeTable     : TCodeTable;
+    oneCode       : Tcode;
+    oneCell       : TData;
+    writeCount    : LongWord;
+function find(svalue:byte):TCodePTR;
+var       first       : longWord;
+          last       : longword;
+          mid         : longWord;
+begin
+    first:=0;
+    last:=codeTable.get_size()-1;
+    while (first<last) do
+    begin
+        mid:=(first+last)shr 1;
+        if (codeTable.at(mid)^.first < svalue) then
+            first:=mid+1
+        else
+            last:=mid;
+    end;
+
+    result := codeTable.at(first);
+end;
+procedure sort();
+    procedure swap(var a,b:Tcode);    inline;
+    var       t : TCode;
+    begin
+        t := a; a := b; b := t;
+    end;
+    procedure Qsort(L,R:int);
+    var       x :     byte;
+              i :     int;
+              j :     int;
+    begin
+        i := l;
+        j := r;
+        x := codeTable.at( (i+j) shr 1 ).first;
+        repeat
+            while (codeTable.at(i).first < x) do
+                inc(i);
+            while (codeTable.at(j).first > x) do
+                dec(j);
+            if (i<=j) then
+            begin
+                swap(codeTable.at(i)^,codeTable.at(j)^);
+                inc(i);dec(j);
+            end;
+        until i>j;
+        if i < R then Qsort(i,r);
+        if j > L then Qsort(L,j);
+    end;
+begin
+    Qsort(0,CodeTable.get_size()-1);
+end;
+begin
+    assignFile(DataFile,fn);
+    reset(DataFile);
+
+    for i:=0 to 255 do TempArrayFrequency[i]:=0;
+
+    while (true) do
+    begin
+        try
+            read(DataFile,symbol);
+        except
+            break;
+        end;
+        inc(tempArrayfrequency[symbol]);
+    end;
+
+    newFileName := getVoidFileName(fn)+'.hafm';
+    assignFile(HafDataFile,newFileName);
+    rewrite(HafDataFile);
+
+    make_file_write(HafDataFile,longWord($00000000));
+    writeExt(HafDataFile,fn);
+
+    tree := THafTree.create();
+    CodeTable := TVector<TCode>.create();
+    for i:=0 to 255 do
+        if TempArrayFrequency[i] > 0 then
+        begin
+            oneCell.first := TempArrayFrequency[i];
+            oneCell.second:= i;
+            tree.push_back(oneCell);
+        end;
+    tree.createHafTree();
+    tree.getCodes(CodeTable);
+    sort();
+
+    make_file_write(HafDataFile,codeTable.get_size());
+    for ib:= 0 to 255 do
+        if (TempArrayFrequency[ib] > 0) then
+        begin
+           make_file_write(HafDataFile,ib);
+           make_file_write(HafDataFile,TempArrayFrequency[ib]);
+        end;
+    shiftControl := 0;
+    counter := $00;
+    seek(DataFile,0);
+
+    writecount := 0;
+    while (true) do
+    begin
+        try
+            read(DataFile,symbol);
+        except
+            write(HafDataFile,counter);
+            shiftControl := shiftControl shl (8-counter);
+            write(HafDataFile,shiftControl);
+            inc(writeCount);
+            break;
+        end;
+
+        oneCode := find(symbol)^;
+
+        for i := 0 to oneCode.second.get_size() - 1 do
+        begin
+            shiftControl := shiftControl shl 1;
+            inc(counter);
+            if oneCode.second.at(i)^ then
+                shiftControl := shiftControl or $01;
+
+            if counter = 8 then
+            begin
+                write(HafDataFile,shiftControl);
+                inc(writeCount);
+                shiftControl := 0;
+                counter := 0;
+            end;
+        end;
+    end;
+
+    seek(hafDatafile,0);
+    make_file_write(HafDataFile,writeCount);
+
+    updateText(DataFile,HafDataFile);
+
+    tree.destroy();
+    for i:=0 to codeTable.get_size()-1 do
+        codeTable.at(i)^.second.destroy();
+    //oneCode.second.destroy();
+    codeTable.destroy();
+    closeFile(HafDataFile);
+    closeFile(DataFile);
+end;
+procedure createLZWFile(FN:string);
+type
+    TCode       = pair<Word,string>;
+    TCodeTable  = TVector<TCode>;
+    find_res_t  = pair<bool,TCode>;
+var
+    newFileName : string;
+    oneCode     : TCode;
+    CodeTable   : TCodeTable;
+    inFile      : TFileB;
+    outFile     : TFileB;
+    find_res    : find_res_t;
+    symbol      : byte;
+    this_string : string;
+    i           : word;
+
+procedure swap(var a,b:TCode);
+var
+    t : TCode;
+begin
+    t := a; a := b; b:= t;
+end;
+procedure sort();
+var
+    i : int;
+    j : int;
+begin
+    for i := 0 to CodeTable.get_size()-1 do
+    begin
+        j := i;
+        while (j>0)and(CodeTable.at(j-1)^.second > CodeTable.at(j)^.second) do
+        begin
+            swap(CodeTable.at(j-1)^,CodeTable.at(j)^);
+            dec(j);
+        end;
+    end;
+end;
+procedure notSort();
+var
+    j   : int;
+begin
+    j := CodeTable.get_size() - 1;
+    while (j>0)and(CodeTable.at(j-1)^.second > CodeTable.at(j)^.second) do
+    begin
+        swap(CodeTable.at(j-1)^,CodeTable.at(j)^);
+        dec(j);
+    end;
+end;
+function find(svalue:string):find_res_t;
+var
+    first   : int;
+    last    : int;
+    mid     : int;
+begin
+    first := 0;
+    last  := CodeTable.get_size()-1;
+    result.first := false;
+
+    while (first<last) do
+    begin
+        mid:=(first+last)shr 1;
+        if (codeTable.at(mid)^.second < svalue) then
+            first:=mid+1
+        else
+            last:=mid;
+    end;
+    if codeTable.at(first)^.second = svalue then
+    begin
+        result.first := true;
+        result.second := codeTable.at(first)^;
+    end;
+end;
+begin
+    codeTable := TCodeTable.create();
+
+    assignFile(inFile,fn);
+    reset(inFile);
+    newFileName := getVoidFileName(fn)+'.lzw';
+    assignFile(outFile,newfileName);
+    rewrite(outFile);
+    writeExt(outFile,fn);
+
+    for i := 0 to 255 do
+    begin
+        oneCode.first := i;
+        oneCode.second := chr(i);
+        CodeTable.push_back(oneCode);
+    end;
+    sort();
+
+    try
+        read(inFile,symbol);
+    except
+        updateText(inFile,outFile);
+
+        closeFile(inFile);
+        closeFile(outFile);
+        exit;
+    end;
+    this_string := chr(symbol);
+
+    while (True) do
+    begin
+        try
+            read(inFile,symbol);
+        except
+            find_res := find(this_string);
+            make_file_write(outFile,find_res.second.first);
+            break;
+        end;
+
+        find_res := find(this_string + chr(symbol));
+        if find_res.first then
+        begin
+            this_string := this_string + chr(symbol);
+        end
+        else
+        begin
+            find_res := find(this_string);
+            make_file_write(outFile,word(find_res.second.first));
+            if codeTable.get_size() < Word.MaxValue - 1 then
+            begin
+                onecode.first := CodeTable.get_size();
+                oneCode.second := this_string + chr(symbol);
+                CodeTable.push_back(oneCode);
+                notsort();
+            end;
+            this_string := chr(symbol);
+        end;
+    end;
+
+
+    updateText(inFile,outFile);
+
+    codeTable.destroy;
+    closeFile(inFile);
+    closeFile(outFile);
+end;
+procedure createRLEFile(FN:string);
+type
+          TBuffer     = Tvector<byte>;
+
+          procedure clearBuffer(B:TBuffer);
+          begin
+              while b.get_size <> 0 do
+                  b.pop_back();
+          end;
+
+var
+          count       : short;
+          curr        : byte;
+          prev        : byte;
+          i           : byte;
+          temp        : byte;
+          inFile      : TFileB;
+          outFile     : TFileB;
+          newFileName : string;
+          buffer      : TBuffer;
+          rep         : bool;
+begin
+    assignFile(inFile,fn);
+    reset(inFile);
+    newFileName := getVoidFileName(fn)+'.rle';
+    assignFile(outFile,newfileName);
+    rewrite(outFile);
+
+    writeExt(outFile,fn);
+
+    try
+        read(inFile,curr);
+    except
+        updateText(inFile,outFile);
+
+        closeFile(inFile);
+        closeFile(outFile);
+        exit;
+    end;
+
+    rep := false;
+    count := 0;
+    prev := curr;
+    buffer := TBuffer.create();
+
+    while (true) do
+    begin
+        try
+            read(inFile,curr);
+        except
+            if count > 0 then
+            begin
+                if rep then
+                begin
+                    write(outFile,count);
+                    write(outFile,prev);
+                end
+                else
+                begin
+                    inc(count);
+                    buffer.push_back(prev);
+
+                    temp := -count;
+                    write(outFile,temp);
+                    for i := 0 to count-1 do
+                    begin
+                        temp := buffer.at(i)^;
+                        write(outFile,temp);
+                    end;
+                end;
+            end;
+
+            break;
+        end;
+
+        if prev = curr then
+            if rep then
+            begin
+                inc(count);
+                if count = 127 then
+                begin
+                    write(outFile,count);
+                    write(outFile,prev);
+                    count := 1;
+                end;
+            end
+            else
+            begin
+                if count > 0 then
+                begin
+                    temp := -count;
+                    make_file_write(outFile,temp);
+                    for i:=0 to count-1 do
+                    begin
+                        temp := buffer.at(i)^;
+                        write(outFile,temp);
+                    end;
+                    clearBuffer(buffer);
+                end;
+
+                count := 2;
+                rep := true;
+            end
+        else
+            if rep then
+            begin
+                write(outFile,count);
+                write(outFile,prev);
+
+                rep := false;
+                count := 0;
+            end
+            else
+            begin
+
+
+                buffer.push_back(prev);
+                inc(count);
+                if count = 127 then
+                begin
+                    temp := -count;
+                    make_file_write(outFile,temp);
+                    for i:=0 to count-1 do
+                    begin
+                        temp := buffer.at(i)^;
+                        write(outFile,temp);
+                    end;
+                    clearBuffer(buffer);
+                    count := 1;
+                    buffer.push_back(prev);
+                end;
+            end;
+        prev := curr;
+    end;
+
+
+    updateText(inFile,outFile);
+
+    buffer.destroy;
+    closeFile(inFile);
+    closeFile(outFile);
+end;
+
+procedure readHafFile(Fn:string);
+type
+          THafTree    = TBin_search_tree;
+var
+          inFile      : TFileB;
+          outFile     : TFileB;
+          newFileName : string;
+          TableL      : int;
+          LW          : array[0..3] of byte;
+          symbol      : byte;
+          i           : int;
+          oneCell     : TData;
+          hafTree     : THafTree;
+          MainNode    : TMainNodePTR;
+          counter     : byte;
+          value       : byte;
+          //bigSeek     : longWord;
+          //codeTable   : TCodeTable;
+          codeCount   : LongWord;
+          //debugFile   : TFileB;
+begin
+    assignFile(inFile,FN);
+    reset(inFile);
+
+//    assign(debugFile,'tests\отчет_лаболаторная_работа_3_.docx');
+//    reset(debugFile);
+
+    read(inFile,lw[0]);
+    read(inFile,lw[1]);
+    read(inFile,lw[2]);
+    read(inFile,lw[3]);
+    codeCount := lw[3] shl 24 + lw[2] shl 16 + lw[1] shl 8 + lw[0];
+
+    newFileName := readExt(inFile);
+    if newFileName = '' then
+        newFileName := getVoidFileName(fn)
+    else
+        newFileName := getVoidFileName(fn)+'.'+newFileName;
+    assignFile(outFile,newFileName);
+    rewrite(outFile);
+
+    read(inFile,lw[0]);
+    read(inFile,lw[1]);
+    read(inFile,lw[2]);
+    read(inFile,lw[3]);
+    TableL:= lw[3] shl 24 + lw[2] shl 16 + lw[1] shl 8 + lw[0];
+    
+    hafTree := thafTree.create();
+    for i:=0 to TableL-1 do
+    begin
+        read(inFile,symbol);
+        read(inFile,lw[0]);
+        read(inFile,lw[1]);
+        read(inFile,lw[2]);
+        read(inFile,lw[3]);
+        oneCell.first   := lw[3] shl 24 + lw[2] shl 16 + lw[1] shl 8 + lw[0];
+        onecell.second  := symbol;
+        hafTree.push_back(oneCell);
+    end;
+    hafTree.createHafTree();
+
+    mainNode := hafTree.get_root;
+
+    value := 0;
+    counter := 8;
+    for i:= 1 to codeCount do
+    begin
+        if i < codeCount then
+            read(inFile,value)
+        else
+        begin
+            read(inFile,counter);
+            read(inFile,value);
+        end;
+
+        while counter > 0 do
+        begin
+            if ( (value and $80) = 0) then
+                mainNode := mainNode.left
+            else
+                mainNode := mainNode.right;
+
+            if ((mainNode.left=nil)and(mainNode.right=nil)) then
+            begin
+                write(outFile,mainNode.data.second);
+                mainNode := hafTree.get_root;
+            end;
+
+            value := value shl 1;
+            dec(counter);
+        end;
+        counter := 8;
+    end;
+
+
+    mainForm.SFS_text.Text := intToStr(fileSize(inFile));
+    mainForm.CFS_text.Text := inttoStr(filesize(outFile));
+    mainForm.CompR_text.Text := '-';
+
+    hafTree.destroy;
+    closeFile(inFile);
+    closeFile(outFile);
+end;
+procedure readRLEFile(FN:string);
+var
+          newFileName   : String;
+          inFile        : TFileB;
+          outFile       : TFileB;
+          value         : Byte;
+          symbol        : Byte;
+          i             : Byte;
+begin
+    assignFile(inFile,FN);
+    reset(inFile);
+
+    newFileName := readExt(inFile);
+    if newFileName = '' then
+        newFileName := getVoidFileName(fn)
+    else
+        newFileName := getVoidFileName(fn)+'.'+newFileName;
+    assignFile(outFile,newFileName);
+    rewrite(outFile);
+
+    while (True) do
+    begin
+        try
+            read(inFile,value);
+        except
+            break;
+        end;
+
+        if value > 127 then
+            for i := 1 to 256 - value do
+            begin
+                read(inFile,symbol);
+                write(outFile,symbol);
+            end
+        else
+        begin
+            read(inFile,symbol);
+            for i:=1 to value do
+                write(outFile,symbol);
+        end;
+    end;
+
+    mainForm.SFS_text.Text := intToStr(fileSize(inFile));
+    mainForm.CFS_text.Text := inttoStr(filesize(outFile));
+    mainForm.CompR_text.Text := '-';
+
+    closeFile(inFile);
+    closeFile(outFile);
+end;
+procedure readLZWFile(FN:string);
+type
+          TCode         = pair<word,string>;
+          TCodeTable    = Tvector<TCode>;
+
+          find_res_t    = pair<bool,TCode>;
+var
+          newFileName   : String;
+          inFile        : TFileB;
+          outFile       : TFileB;
+          symbol        : Byte;
+          i             : Byte;
+          oldCode       : Word;
+          newCode       : Word;
+          find_res      : find_res_t;
+          CodeTable     : TCodeTable;
+          oneCode       : TCode;
+          strOut        : string;
+
+function find(svalue:word):find_res_t;
+var      first       : int;
+         last        : int;
+         mid         : int;
+begin
+    result.first := false;
+    first:=0;
+    last:= codeTable.get_size()-1;
+    while (first<last) do
+    begin
+        mid:=(first+last)shr 1;
+        if (codeTable.at(mid)^.first < svalue) then
+            first:=mid+1
+        else
+            last:=mid;
+    end;
+
+    if codeTable.at(first)^.first = svalue then
+    begin
+        result.first := true;
+        result.second := codeTable.at(first)^;
+    end;
+end;
+procedure sort();
+    procedure swap(var a,b:Tcode);    inline;
+    var       t : TCode;
+    begin
+        t := a; a := b; b := t;
+    end;
+var
+    i     : LongWord;
+    j     : LongWord;
+begin
+    for i:=1 to codeTable.get_size()-1 do
+    begin
+        j:=i;
+        while (j>0)and(codeTable.at(j-1)^.first > codeTable.at(j)^.first) do
+        begin
+            swap(codeTable.at(j-1)^,codeTable.at(j)^);
+            dec(j);
+        end;
+    end;
+end;
+begin
+    assignFile(inFile,FN);
+    reset(inFile);
+
+    newFileName := readExt(inFile);
+    if newFileName = '' then
+        newFileName := getVoidFileName(fn)
+    else
+        newFileName := getVoidFileName(fn)+'.'+newFileName;
+    assignFile(outFile,newFileName);
+    rewrite(outFile);
+
+    try
+        read_from_file(inFile,oldCode);
+    except
+        mainForm.SFS_text.Text := intToStr(fileSize(inFile));
+        mainForm.CFS_text.Text := inttoStr(filesize(outFile));
+        mainForm.CompR_text.Text := '-';
+
+        closeFile(inFile);
+        closeFile(outFile);
+        exit;
+    end;
+
+    CodeTable := TCodeTable.create;
+    for i := 0 to 255 do
+    begin
+        oneCode.first := i;
+        oneCode.second := chr(i);
+        CodeTable.push_back(oneCode);
+    end;
+
+    make_file_write(outFile,byte(oldCode));
+    symbol := oldCode mod 256;
+    while (true) do
+    begin
+        try
+            read_from_file(inFile,newCode);
+        except
+            break;
+        end;
+
+        find_res := find(newCode);
+        if not find_res.first then
+        begin
+            strOut := find(oldCode).second.second + chr(symbol);
+        end
+        else
+        begin
+            strOut := find_res.second.second;
+        end;
+
+        make_file_write(outFile,strOut);
+        symbol := ord(strOut[1]);
+        find_res := find(oldCode);
+        if CodeTable.get_size() < word.MaxValue - 1 then
+        begin
+            oneCode.second := find_res.second.second + chr(symbol);
+            oneCode.first := CodeTable.get_size();
+            CodeTable.push_back(oneCode);
+        end;
+
+        oldCode := newCode;
+    end;
+
+    mainForm.SFS_text.Text := intToStr(fileSize(inFile));
+    mainForm.CFS_text.Text := inttoStr(filesize(outFile));
+    mainForm.CompR_text.Text := '-';
+
+    CodeTable.destroy;
+    closeFile(inFile);
+    closeFile(outFile);
+end;
+
+
+procedure MainDecode(FN:string); overload;
+var
+          ExtStr  : String;
+          i       : int;
+begin
+    i := length(FN);
+    while (i>0)and(fn[i]<> '.') do dec(i);
+    inc(i);
+    for i:=i to length(Fn) do
+        ExtStr := ExtStr + fn[i];
+
+    if ExtStr = 'hafm' then
+        readHafFile(FN);
+    if ExtStr = 'rle' then
+        readRLEFile(FN);
+    if ExtStr = 'lzw' then
+        readLZWFile(FN);
+end;
+
+
+procedure TMainForm.ArchiveHafmanExecute(Sender: TObject);
+begin
+    createHafmanFile(path.text);
+    MainForm.dirUpdate;
+end;
+
+procedure TMainForm.ArchiveLZWExecute(Sender: TObject);
+begin
+    createLZWFile(path.Text);
+    mainForm.dirUpdate;
+end;
+
+procedure TMainForm.ArchiveRLEExecute(Sender: TObject);
+begin
+    createRLEFile(path.text);
+    mainForm.dirUpdate;
+end;
+
+procedure TMainForm.changeFileDir(Sender: TObject);
+begin
+    ArchiveLZWButton.Enabled  := false;
+    ArchiveRLEButton.Enabled  := false;
+    ArchiveHafButton.Enabled  := false;
+    DecodeButton.Enabled      := false;
+
+    folders.Drive := drives.Drive;
+    files.Directory := folders.Directory;
+    path.Text := files.FileName;
+    files.Mask := filter.Mask;
+
+    if path.Text <> '' then
+    begin
+        if  (lowercase(getFileExtended(path.Text))<>'hafm')and
+            (lowercase(getFileExtended(path.Text))<>'lzw') and
+            (lowercase(getFileExtended(path.Text))<>'rle') then
+        begin
+            ArchiveLZWButton.Enabled  := true;
+            ArchiveRLEButton.Enabled  := true;
+            ArchiveHafButton.Enabled  := true;
+        end
+        else
+        begin
+            DecodeButton.Enabled := true;
+        end;
+        textUpdate;
+    end
+//    else
+//        SFS_text.Text := '';
+end;
+
+procedure TMainForm.createMainForm(Sender: TObject);
+var
+    exeFileName       : string;
+begin
+    ArchiveLZWButton.Enabled  := false;
+    ArchiveRLEButton.Enabled  := false;
+    ArchiveHafButton.Enabled  := false;
+    DecodeButton.Enabled      := false;
+    exeFileName := extractFilePath(Application.ExeName);
+    Drives.Drive  := exeFileName[1];
+    folders.Drive := drives.Drive;
+    files.Directory := exeFileName;
+    Filter.Filter := 'All Files (*.*)|*.*|Text files (*.TXT)|*.TXT|Pascal files (*.PAS)|*.PAS|ARCH3000 (*.hafm;*.lzw;*.rle)|*.hafm;*.lzw;*.rle';
+    files.Mask := Filter.Mask;
+    path.Text := '';
+    SFS_text.text := '';
+    CFS_text.Text := '';
+    CompR_text.Text := '';
+end;
+
+procedure TMainForm.DecodeExecute(Sender: TObject);
+begin
+    MainDecode(path.Text);
+    mainForm.dirUpdate;
+end;
+
+procedure TMainForm.DirectoryUpdateExecute(Sender: TObject);
+begin
+    mainForm.dirUpdate;
+end;
+
+procedure TMainForm.dirUpdate;
+begin
+    files.Update;
+end;
+
+procedure TMainForm.textUpdate;
+var
+    checkF    : TFileB;
+begin
+    if path.Text <> '' then
+    begin
+        assignFile(checkF,path.Text);
+        reset(checkF);
+        SFS_text.Text := intToStr(FileSize(checkF));
+        closeFile(checkF);
+    end
+    else
+        SFS_text.Text := '';
+    CFS_text.Text := '';
+    CompR_text.Text := '';
+end;
+
+end.
